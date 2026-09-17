@@ -114,24 +114,4 @@ if uploaded_file is not None:
                 
     doc.close()
 ''')
-print("✅ app.py script successfully saved to environment workspace!\n")
 
-# ==============================================================================
-# 3. RUN INTERFACE WORKER & DEPLOY WEB TUNNEL
-# ==============================================================================
-print("⏳ Step 3/3: Starting background application and tunneling connections...")
-import subprocess
-
-# Spin up web engine quietly in background
-subprocess.Popen(["streamlit", "run", "app.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-print("\n" + "="*50)
-print("🔑 STEP A: COPY THIS PASSWORD:")
-print("="*50)
-!curl -s ://icanhazip.com
-print("="*50)
-
-print("\n🌐 STEP B: CLICK THIS LINK TO OPEN DAD'S APP:")
-print("="*50)
-# Start public connection proxy
-!npx localtunnel --port 8501
