@@ -13,7 +13,7 @@ st.write("Adjust settings in the sidebar to see changes in real-time on the prev
 
 # Sidebar Settings panel
 st.sidebar.header("🎛️ Fine-Tune Enhancements")
-dpi_setting = st.sidebar.slider("Resolution (DPI)", min_value=100, max_value=300, value=200, step=50)
+dpi_setting = st.sidebar.slider("Resolution (DPI)", min_value=200, max_value=400, value=300, step=30)
 
 # Settings matching your core text enhancement adjustments
 sharpness_val = st.sidebar.slider("Sharpness", min_value=1.0, max_value=3.0, value=1.80, step=0.1)
@@ -102,7 +102,7 @@ if uploaded_file is not None:
                 
                 # Expose direct browser downloader stream button
                 st.download_button(
-                    label="💾 Click here to download Enhanced PDF",
+                    label="💾 DOWNLOAD ENHANCED PDF",
                     data=output_bytes,
                     file_name="enhanced_output.pdf",
                     mime="application/pdf",
