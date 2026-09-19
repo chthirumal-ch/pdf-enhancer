@@ -1,205 +1,116 @@
-import streamlit as st
-import cv2
-import numpy as np
+print("⏳ Step 2/3: Generating the Streamlit UI script...")
+with open("app.py", "w") as f:
+    f.write('''import streamlit as st
 import fitz  # PyMuPDF
+from PIL import Image, ImageEnhance
 import io
-import os
-from PIL import Image
-from ultralytics import YOLO
 
-# ⚙️ Web Workspace Layout Initializer Configuration
-st.set_page_config(page_title="AI Document Scanner Pro", page_icon="📄", layout="centered")
+# App Layout Configuration (Using wide mode for side-by-side previewing)
+st.set_page_config(page_title="PDF Enhancer", page_icon="📄", layout="wide")
 
-st.title("Crop Application")
-st.write("Upload raw smartphone capture images or PDF packets to automatically isolate document pages and strip away background surfaces.")
+st.title("📄 OUR PDF ENHANCER")
+st.write("Adjust settings in the sidebar to see changes in real-time on the preview window.")
 
-# 🧠 Check and load your private custom trained AI brain
-MODEL_PATH = "best.pt"
+# Sidebar Settings panel
+st.sidebar.header("🎛️ Fine-Tune Enhancements")
+dpi_setting = st.sidebar.slider("Resolution (DPI)", min_value=200, max_value=400, value=300, step=30)
 
-@st.cache_resource
-def load_custom_model():
-    if not os.path.exists(MODEL_PATH):
-        st.error(f"❌ Missing Core Model Weights: Could not locate '{MODEL_PATH}' in your repository root folder.")
-        return None
-    return YOLO(MODEL_PATH)
+# Settings matching your core text enhancement adjustments
+sharpness_val = st.sidebar.slider("Sharpness", min_value=1.0, max_value=3.0, value=1.80, step=0.1)
+brightness_val = st.sidebar.slider("Brightness", min_value=1.0, max_value=3.0, value=1.60, step=0.1)
+contrast_val = st.sidebar.slider("Contrast", min_value=1.0, max_value=3.0, value=1.40, step=0.1)
 
-custom_ai_model = load_custom_model()
+# Helper function to process images uniformly 
+def apply_enhancements(img, sharp, bright, cont):
+    img = img.convert("L")  # Convert to Grayscale
+    img = ImageEnhance.Sharpness(img).enhance(sharp)   # Crisp text lines
+    img = ImageEnhance.Brightness(img).enhance(bright) # Bleach gray background
+    img = ImageEnhance.Contrast(img).enhance(cont)     # Make ink darker
+    return img
 
-def order_points_obb(pts):
-    """Consistent 4-point grouping allocation (top-left, top-right, bottom-right, bottom-left)"""
-    pts = pts.reshape(4, 2)
-    rect = np.zeros((4, 2), dtype="float32")
-    x_sorted = pts[np.argsort(pts[:, 0]), :]
-    left_most = x_sorted[:2, :]
-    right_most = x_sorted[2:, :]
+# Main Document Upload Widget
+uploaded_file = st.file_uploader("Drop your PDF here or click to browse", type=["pdf"])
 
-    tl = left_most[np.argmin(left_most[:, 1]), :]
-    bl = left_most[np.argmax(left_most[:, 1]), :]
-    tr = right_most[np.argmin(right_most[:, 1]), :]
-    br = right_most[np.argmax(right_most[:, 1]), :]
+if uploaded_file is not None:
+    # Read file stream safely into memory
+    file_bytes = uploaded_file.read()
+    doc = fitz.open(stream=file_bytes, filetype="pdf")
+    total_pages = len(doc)
+    
+    st.info(f"Loaded document successfully! Total Pages: {total_pages}")
+    
+    # Allow choosing which page to preview
+    preview_page_num = st.number_input("Select page to preview:", min_value=1, max_value=total_pages, value=1)
+    
+    # --- LIVE PREVIEW WINDOW ---
+    st.subheader(f"🔍 Live Preview (Page {preview_page_num})")
+    
+    # Process chosen preview page (0-indexed in PyMuPDF)
+    preview_page = doc[preview_page_num - 1]
+    preview_pix = preview_page.get_pixmap(dpi=150)  # slightly lower DPI for rapid rendering
+    orig_preview_img = Image.frombytes("RGB", [preview_pix.width, preview_pix.height], preview_pix.samples)
+    
+    # Run the filters over the raw preview image
+    enhanced_preview_img = apply_enhancements(orig_preview_img, sharpness_val, brightness_val, contrast_val)
+    
+    # Render layout side-by-side using Streamlit horizontal layouts
+    col1, col2 = st.columns(2)
+    with col1:
+        st.caption(f"Original Page {preview_page_num}")
+        st.image(orig_preview_img, use_container_width=True)
+    with col2:
+        st.caption(f"Enhanced Page {preview_page_num} (Live Preview)")
+        st.image(enhanced_preview_img, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # --- FULL PRODUCTION RUN ---
+    st.subheader("🚀 Ready?")
+    if st.button("Process & Download Full PDF", type="primary", use_container_width=True):
+        with st.spinner(f"Processing all {total_pages} pages... please stand by."):
+            try:
+                new_doc = fitz.open()
 
-    rect[0], rect[1], rect[2], rect[3] = tl, tr, br, bl
-    return rect
+                # Loop through and filter every page sequentially
+                for page_index in range(total_pages):
+                    page = doc[page_index]
 
-def crop_document_with_v4_ai_hd(cv_image_input):
-    """
-    Tracks document edges using your custom AI brain, processes GrabCut boundary
-    corrections, and returns crisp top-down array formats via high-fidelity interpolation.
-    """
-    if custom_ai_model is None:
-        return Image.fromarray(cv2.cvtColor(cv_image_input, cv2.COLOR_BGR2RGB))
-        
-    orig_cv = cv_image_input.copy()
-    h_orig, w_orig = cv_image_input.shape[:2]
+                    # Extract page image based on sidebar chosen DPI setting
+                    pix = page.get_pixmap(dpi=dpi_setting)
+                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
-    results = custom_ai_model(cv_image_input, verbose=False)
-    doc_points = None
+                    # Fire enhancement transformations
+                    img = apply_enhancements(img, sharpness_val, brightness_val, contrast_val)
 
-    for result in results:
-        if result.obb is not None and len(result.obb.xyxyxyxy) > 0:
-            raw_pts = result.obb.xyxyxyxy.cpu().numpy()  
-            first_doc_pts = raw_pts[0]
-            doc_points = first_doc_pts.reshape(4, 2)
-            break
+                    # Pack filtered images back cleanly into a PDF structure
+                    img_bytes = io.BytesIO()
+                    img.save(img_bytes, format="JPEG", quality=95)
+                    img_bytes.seek(0)
 
-    if doc_points is None:
-        h_pad, w_pad = int(h_orig * 0.04), int(w_orig * 0.04)
-        cropped_fallback = orig_cv[h_pad:h_orig-h_pad, w_pad:w_orig-w_pad]
-        return Image.fromarray(cv2.cvtColor(cropped_fallback, cv2.COLOR_BGR2RGB))
+                    img_doc = fitz.open("pdf", fitz.open(stream=img_bytes.getvalue(), filetype="jpeg").convert_to_pdf())
+                    new_doc.insert_pdf(img_doc)
 
-    rect = order_points_obb(doc_points).reshape(4, 2)
+                # Export document elements out onto byte memory array
+                output_stream = io.BytesIO()
+                new_doc.save(output_stream)
+                new_doc.close()
+                
+                output_bytes = output_stream.getvalue()
 
-    x_coords, y_coords = rect[:, 0], rect[:, 1]
-    xmin, xmax = int(max(0, np.min(x_coords) - 15)), int(min(w_orig - 1, np.max(x_coords) + 15))
-    ymin, ymax = int(max(0, np.min(y_coords) - 15)), int(min(h_orig - 1, np.max(y_coords) + 15))
-    bgdModel = np.zeros((1, 65), np.float64)
-    fgdModel = np.zeros((1, 65), np.float64)
-    mask = np.zeros(cv_image_input.shape[:2], np.uint8)
+                st.balloons()  # Fun success animation overlay
+                st.success("✨ Whole document processing complete!")
+                
+                # Expose direct browser downloader stream button
+                st.download_button(
+                    label="💾 DOWNLOAD ENHANCED PDF",
+                    data=output_bytes,
+                    file_name="enhanced_output.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
 
-    rect_tuple = (xmin, ymin, xmax - xmin, ymax - ymin)
-    cv2.grabCut(cv_image_input, mask, rect_tuple, bgdModel, fgdModel, 3, cv2.GC_INIT_WITH_RECT)
-
-    refined_mask = np.where((mask == 2) | (mask == 0), 0, 1).astype('uint8')
-    contours, _ = cv2.findContours(refined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    if len(contours) > 0:
-        largest_cnt = max(contours, key=cv2.contourArea)
-        perimeter = cv2.arcLength(largest_cnt, True)
-        approx = cv2.approxPolyDP(largest_cnt, 0.015 * perimeter, True)
-        if len(approx) == 4:
-            rect = order_points_obb(approx.reshape(4, 2))
-        else:
-            center = np.mean(rect, axis=0)
-            for i in range(4):
-                rect[i] = center + (rect[i] - center) * 1.03  
-
-    rect = rect.reshape(4, 2)
-    tl, tr, br, bl = rect[0], rect[1], rect[2], rect[3]
-
-    width_a = np.linalg.norm(br - bl)
-    width_b = np.linalg.norm(tr - tl)
-    max_width = int(max(width_a, width_b))
-
-    height_a = np.linalg.norm(tr - br)
-    height_b = np.linalg.norm(tl - bl)
-    max_height = int(max(height_a, height_b))
-
-    dst = np.array([,
-        [max_width - 1, 0],
-        [max_width - 1, max_height - 1],
-        [0, max_height - 1]
-    ], dtype="float32")
-
-    transform_matrix = cv2.getPerspectiveTransform(rect.astype(np.float32), dst)
-    warped_result = cv2.warpPerspective(orig_cv, transform_matrix, (max_width, max_height), flags=cv2.INTER_CUBIC)
-
-    return Image.fromarray(cv2.cvtColor(warped_result, cv2.COLOR_BGR2RGB))
-
-
-# 📤 File Upload Tray Manager Panel
-# FIX: Added "jfif" directly to the allowed formats list
-uploaded_files = st.file_uploader(
-    "Upload your customer image files or PDF documents here:", 
-    type=["png", "jpg", "jpeg", "jfif", "pdf"], 
-    accept_multiple_files=True
-)
-
-if uploaded_files:
-    if 'processed_data' not in st.session_state:
-        st.session_state.processed_data = None
-        st.session_state.output_name = ""
-        st.session_state.mime_type = ""
-
-    if st.session_state.processed_data is None:
-        if st.button("✂️ Crop", type="primary", use_container_width=True):
-            with st.spinner("AI Processing files... Please wait..."):
-                processed_images_cache = []
-                input_is_pdf = False
-                base_name = "scanned_output"
-
-                for file in uploaded_files:
-                    base_name = os.path.splitext(file.name)[0]
-                    
-                    if file.name.lower().endswith(".pdf"):
-                        input_is_pdf = True
-                        pdf_bytes = file.read()
-                        pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
-                        
-                        for page_idx in range(len(pdf_document)):
-                            page = pdf_document[page_idx]
-                            pixmap = page.get_pixmap(dpi=150)
-                            image_data = Image.frombytes("RGB", [pixmap.width, pixmap.height], pixmap.samples)
-                            cv_img = cv2.cvtColor(np.array(image_data), cv2.COLOR_RGB2BGR)
-                            
-                            cropped_pil = crop_document_with_v4_ai_hd(cv_img)
-                            processed_images_cache.append(cropped_pil)
-                        pdf_document.close()
-                    else:
-                        # FIX: Use PIL to safely open image streams (handles complex JFIF profiles cleanly)
-                        pil_raw = Image.open(file).convert("RGB")
-                        # Transform safely into standard BGR format for OpenCV
-                        cv_img = cv2.cvtColor(np.array(pil_raw), cv2.COLOR_RGB2BGR)
-                        
-                        cropped_pil = crop_document_with_v4_ai_hd(cv_img)
-                        processed_images_cache.append(cropped_pil)
-
-                if len(processed_images_cache) > 0:
-                    if len(processed_images_cache) == 1 and not input_is_pdf:
-                        img_buffer = io.BytesIO()
-                        processed_images_cache[0].save(img_buffer, format="JPEG", quality=100, subsampling=0)
-                        st.session_state.processed_data = img_buffer.getvalue()
-                        st.session_state.output_name = f"perfect_crop_{base_name}.jpg"
-                        st.session_state.mime_type = "image/jpeg"
-                    else:
-                        pdf_compiler = fitz.open()
-                        for pil_page in processed_images_cache:
-                            img_buffer = io.BytesIO()
-                            pil_page.save(img_buffer, format="JPEG", quality=98)
-                            img_buffer.seek(0)
-                            
-                            page_pdf_bytes = fitz.open("pdf", fitz.open(stream=img_buffer.getvalue(), filetype="jpeg").convert_to_pdf())
-                            pdf_compiler.insert_pdf(page_pdf_bytes)
-                            
-                        pdf_output_buffer = io.BytesIO()
-                        pdf_compiler.save(pdf_output_buffer)
-                        pdf_compiler.close()
-                        
-                        st.session_state.processed_data = pdf_output_buffer.getvalue()
-                        st.session_state.output_name = f"cropped_bundle_{base_name}.pdf"
-                        st.session_state.mime_type = "application/pdf"
-            st.rerun()
-
-    else:
-        st.success(f"🎉 Custom AI crop optimization complete!")
-        st.download_button(
-            label=f"📥 Download Your Cropped Document ({st.session_state.output_name})",
-            data=st.session_state.processed_data,
-            file_name=st.session_state.output_name,
-            mime=st.session_state.mime_type,
-            type="primary",
-            use_container_width=True
-        )
-        
-        if st.button("🔄 Scan Another Document", use_container_width=True):
-            st.session_state.processed_data = None
-            st.rerun()
+            except Exception as e:
+                st.error(f"An unexpected error occurred while processing: {e}")
+                
+    doc.close()
+''')
