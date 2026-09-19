@@ -30,7 +30,7 @@ def apply_enhancements(img, sharp, bright, cont):
 # Main Document Upload Widget - Now supports images (PNG, JPG, JPEG) and PDFs simultaneously!
 uploaded_files = st.file_uploader(
     "Drop your PDF or Image files here (Hold Ctrl to select multiple images)", 
-    type=["pdf", "png", "jpg", "jpeg"], 
+    type=["pdf", "png", "jpg", "jpeg","jfif"], 
     accept_multiple_files=True
 )
 
