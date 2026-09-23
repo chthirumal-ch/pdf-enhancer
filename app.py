@@ -181,7 +181,7 @@ if uploaded_files:
         
         # This official native button instantly pops open the browser file save path window 
         st.download_button(
-            label=f"⬇️ DOWNLOAD PDF ({st.session_state.final_filename})",
+            label=f"⬇️ DOWNLOAD PDF",
             data=st.session_state.processed_pdf_bytes,
             file_name=st.session_state.final_filename,
             mime="application/pdf",
