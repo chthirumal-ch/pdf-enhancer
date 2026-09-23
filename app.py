@@ -10,7 +10,7 @@ from PIL import Image
 st.set_page_config(page_title="AI Document Enhancer Pro", page_icon="💎", layout="centered")
 
 st.title("💎DOCUMENT ENHANCER")
-st.write("Upload raw smartphone images or PDF packets. The app will automatically optimize text clarity and wipe background stains.")
+st.write("Bhavani Xerox")
 
 # ==============================================================================
 # PRO-CLASS PERFORMANCE CONSTANTS
