@@ -1,194 +1,190 @@
 import streamlit as st
+import cv2
+import numpy as np
 import fitz  # PyMuPDF
-from PIL import Image, ImageEnhance
 import io
 import os
+import base64
+from PIL import Image
 
-# App Layout Configuration (Using wide mode for side-by-side previewing)
-st.set_page_config(page_title="Bhavani Xerox-Document Enhancer", page_icon="💎", layout="wide")
+# ⚙️ Web Workspace Layout Initializer Configuration
+st.set_page_config(page_title="AI Document Enhancer Pro", page_icon="📄", layout="centered")
 
-st.title("💎 ENHANCE DOCUMENTS")
-st.write("Upload single/multiple images or PDF packets. Adjust settings in the sidebar to see changes in real-time.")
+st.title("📄 COMMERCIAL-GRADE AUTOMATED DOCUMENT ENHANCER")
+st.write("Upload raw smartphone images or PDF packets. The app will automatically optimize text clarity and wipe background stains.")
 
-# Sidebar Settings panel
-st.sidebar.header("🎛️ Fine-Tune Enhancements")
-dpi_setting = st.sidebar.slider("Resolution (DPI)", min_value=250, max_value=400, value=300, step=10)
+# ==============================================================================
+# PRO-CLASS PERFORMANCE CONSTANTS
+# ==============================================================================
+TARGET_LONG_SIDE = 2400     # Target resolution for crisp print formatting
+MAX_UPSCALE_FACTOR = 2.0    # Soft interpolation limit to prevent blow-up blur
+PDF_ZOOM_FACTOR = 2.5       # Resolution scale for PDF extraction loops
+OUTPUT_MODE = "grayscale"   # "grayscale" or "binary"
 
-# Settings matching your core text enhancement adjustments
-sharpness_val = st.sidebar.slider("Sharpness", min_value=1.0, max_value=5.0, value=1.80, step=0.1)
-brightness_val = st.sidebar.slider("Brightness", min_value=1.0, max_value=3.0, value=1.60, step=0.1)
-contrast_val = st.sidebar.slider("Contrast", min_value=1.0, max_value=3.0, value=1.40, step=0.1)
+DENOISE_STRENGTH = 15       # Less smoothing of photos / thin strokes
+LIGHT_MAP_SIZE = 110        # Larger = keeps more photo tone (shadows still removed)
+SHARPEN_AMOUNT = 2.0        # High sharpness multiplier
+SHARPEN_SIGMA = 0.9         # Tighter radius = crisper edges, fewer halos
+CONTRAST_BOOST = 1.0        # Smoothstep S-curve contrast boost
 
-# Helper function to process images uniformly
-def apply_enhancements(img, sharp, bright, cont):
-    img = img.convert("L")  # Convert to Grayscale
-    img = ImageEnhance.Sharpness(img).enhance(sharp)   # Crisp text lines
-    img = ImageEnhance.Brightness(img).enhance(bright) # Bleach gray background
-    img = ImageEnhance.Contrast(img).enhance(cont)     # Make ink darker
-    return img
+def _odd(n):
+    """Ensures a kernel/block size is a valid odd integer >= 3."""
+    n = int(n)
+    if n < 3:
+        n = 3
+    return n if n % 2 == 1 else n + 1
 
-def render_pdf_page(doc, page_index, dpi):
-    """FIX: pin an explicit RGB colorspace so PDFs using CMYK, indexed, or
-    alpha color spaces don't break Image.frombytes('RGB', ...)."""
-    pix = doc[page_index].get_pixmap(dpi=dpi, colorspace=fitz.csRGB, alpha=False)
-    return Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-
-def scale_image_for_print(img, target_dpi):
+def apply_commercial_grade_enhancements(pil_img, mode=OUTPUT_MODE):
     """
-    FIX: the original code assumed every uploaded image was at 72 DPI and
-    unconditionally upscaled it by (target_dpi / 72), which for this app's
-    slider range (250-400) meant EVERY image was blown up 3.5x-5.5x in each
-    dimension regardless of its actual size. That doesn't add real detail
-    (just interpolated blur), and can make the app slow or run out of memory
-    on ordinary phone photos.
-
-    Instead: read the image's actual embedded DPI if it has one (most
-    scanner/camera output doesn't reliably set this, so we fall back to
-    assuming it's already print-resolution and leave it alone). Only
-    upscale if the image is clearly lower-resolution than what's needed,
-    and cap the scale factor so a bad assumption can't cause a runaway
-    resize.
+    Advanced Restoration Pipeline: Corrects smartphone shadows, normalizes contrast,
+    protects handwritten strokes, and sharpens text lines cleanly.
     """
-    source_dpi = img.info.get("dpi", (target_dpi, target_dpi))[0]
-    if not source_dpi or source_dpi <= 0:
-        source_dpi = target_dpi  # unknown DPI -> assume it's already fine, don't blow it up
+    img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+    h, w = img.shape[:2]
+    base_dim = min(h, w)
+    scale_ref = base_dim / 1200.0
 
-    scale_factor = target_dpi / source_dpi
-    scale_factor = max(1.0, min(scale_factor, 2.0))  # never upscale more than 2x
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    if scale_factor > 1.0:
-        w, h = img.size
-        img = img.resize((int(w * scale_factor), int(h * scale_factor)), Image.Resampling.LANCZOS)
-    return img
+    # Light noise removal (reduced so photos / strokes are not smoothed)
+    denoised = cv2.bilateralFilter(gray, d=5, sigmaColor=DENOISE_STRENGTH, sigmaSpace=DENOISE_STRENGTH)
 
-# Main Document Upload Widget - Now supports images (PNG, JPG, JPEG) and PDFs simultaneously!
+    # Shadow / uneven-light removal
+    light_map_k = _odd(LIGHT_MAP_SIZE * scale_ref)
+    bg_light_map = cv2.GaussianBlur(denoised, (light_map_k, light_map_k), 0)
+    bg_light_map[bg_light_map == 0] = 1
+    norm_gray = cv2.divide(denoised, bg_light_map, scale=255)
+
+    # Balanced contrast equalization (CLAHE)
+    clahe = cv2.createCLAHE(clipLimit=1.2, tileGridSize=(16, 16))
+    contrasted = clahe.apply(norm_gray)
+
+    # Unsharp mask sharpening
+    blur_for_sharpen = cv2.GaussianBlur(contrasted, (0, 0), sigmaX=SHARPEN_SIGMA * max(scale_ref, 1.0))
+    crisp = cv2.addWeighted(contrasted, 1 + SHARPEN_AMOUNT, blur_for_sharpen, -SHARPEN_AMOUNT, 0)
+
+    # Small contrast boost: gentle S-curve (darker darks, cleaner whites)
+    if CONTRAST_BOOST > 0:
+        x = np.arange(256, dtype=np.float32) / 255.0
+        s_curve = x * x * (3.0 - 2.0 * x)                       # smoothstep S-curve
+        lut = ((1.0 - CONTRAST_BOOST) * x + CONTRAST_BOOST * s_curve) * 255.0
+        crisp = cv2.LUT(crisp, np.clip(lut, 0, 255).astype(np.uint8))
+
+    if mode == "binary":
+        block = _odd(35 * scale_ref)
+        binary = cv2.adaptiveThreshold(
+            crisp, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY, block, 12
+        )
+        final_gray = cv2.medianBlur(binary, 3)
+    else:
+        final_gray = crisp
+
+    # Convert back to standard 3-channel matrix format layout
+    final_output = cv2.cvtColor(final_gray, cv2.COLOR_GRAY2BGR)
+    return Image.fromarray(cv2.cvtColor(final_output, cv2.COLOR_BGR2RGB))
+
+def smart_upscale(img):
+    """Upscales low-res documents cleanly to the target resolution threshold."""
+    w, h = img.size
+    long_side = max(w, h)
+    if long_side >= TARGET_LONG_SIDE:
+        return img
+
+    needed_factor = TARGET_LONG_SIDE / long_side
+    scale_factor = min(needed_factor, MAX_UPSCALE_FACTOR)
+    if scale_factor <= 1.0:
+        return img
+
+    return img.resize((int(w * scale_factor), int(h * scale_factor)), Image.Resampling.LANCZOS)
+
+def trigger_instant_download(data_bytes, filename, mime_type):
+    """Injects a frontend JS trigger to download files automatically without extra steps."""
+    b64_data = base64.b64encode(data_bytes).decode()
+    js_script = f"""
+        <script>
+            var link = document.createElement('a');
+            link.href = 'data:{mime_type};base64,{b64_data}';
+            link.download = '{filename}';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        </script>
+    """
+    # Exposing the dynamic frontend trigger execution layer quietly
+    st.components.v1.html(js_script, height=0, width=0)
+
+# ==============================================================================
+# STREAMLIT INTERFACE MANAGER
+# ==============================================================================
 uploaded_files = st.file_uploader(
-    "Drop your PDF or Image files here (Hold Ctrl to select multiple images)",
-    type=["pdf", "png", "jpg", "jpeg", "jfif"],
+    "Upload single/multiple image files or PDF documents here:", 
+    type=["png", "jpg", "jpeg", "jfif", "pdf"], 
     accept_multiple_files=True
 )
 
 if uploaded_files:
-    # Temporary array structures to store unenhanced preview versions
-    raw_preview_images = []
+    # A single dynamic primary execution panel
+    if st.button("🚀 Enhance & Download", type="primary", use_container_width=True):
+        with st.spinner("Processing files... Please wait..."):
+            new_doc = fitz.open()
+            total_pages_processed = 0
+            base_output_name = "enhanced_document"
 
-    # FIX: wrap the parsing loop in try/except. Previously a single corrupt
-    # PDF or unreadable image file would crash the whole app before the
-    # user ever saw a preview or an error message.
-    parse_error = None
-    for uploaded_file in uploaded_files:
-        try:
-            file_bytes = uploaded_file.read()
-            file_ext = os.path.splitext(uploaded_file.name)[1].lower()
+            for idx, file in enumerate(uploaded_files):
+                file_bytes = file.read()
+                file_ext = os.path.splitext(file.name)[1].lower()
+                
+                # Grabbing the name of the first file for download tracking
+                if idx == 0:
+                    base_output_name = os.path.splitext(file.name)[0]
 
-            # Scenario A: Handle Incoming PDF Documents
-            if file_ext == ".pdf":
-                doc = fitz.open(stream=file_bytes, filetype="pdf")
-                for page_index in range(len(doc)):
-                    # lower DPI here is fine, this is just for screen preview
-                    page_img = render_pdf_page(doc, page_index, dpi=150)
-                    raw_preview_images.append(page_img)
-                doc.close()
+                # Scenario A: Process PDF pack elements page by page
+                if file_ext == ".pdf":
+                    doc = fitz.open(stream=file_bytes, filetype="pdf")
+                    for page_index in range(len(doc)):
+                        page = doc[page_index]
+                        zoom_matrix = fitz.Matrix(PDF_ZOOM_FACTOR, PDF_ZOOM_FACTOR)
+                        pix = page.get_pixmap(matrix=zoom_matrix, colorspace=fitz.csRGB, alpha=False)
 
-            # Scenario B: Handle Incoming Images (JPG/PNG)
-            else:
-                img_data = Image.open(io.BytesIO(file_bytes)).convert("RGB")
-                raw_preview_images.append(img_data)
-
-        except Exception as e:
-            parse_error = f"Couldn't read '{uploaded_file.name}': {e}"
-            break
-
-    if parse_error:
-        st.error(f"❌ {parse_error}\n\nPlease remove or re-export that file and try again.")
-        st.stop()
-
-    total_pages = len(raw_preview_images)
-
-    # FIX: an empty/unreadable PDF (0 pages) would otherwise crash
-    # st.number_input, since max_value < min_value is invalid.
-    if total_pages == 0:
-        st.warning("⚠️ No pages could be loaded from the uploaded file(s). "
-                    "Please check the files and try again.")
-        st.stop()
-
-    st.info(f"Loaded successfully! Total Pages generated in file package: {total_pages}")
-
-    # Allow choosing which page to preview
-    preview_page_num = st.number_input("Select page to preview:", min_value=1, max_value=total_pages, value=1)
-
-    # --- LIVE PREVIEW WINDOW ---
-    st.subheader(f"🔍 Live Preview (Page {preview_page_num})")
-    orig_preview_img = raw_preview_images[preview_page_num - 1]
-
-    # Run filters instantly in memory
-    enhanced_preview_img = apply_enhancements(orig_preview_img, sharpness_val, brightness_val, contrast_val)
-
-    # Side-by-side split screen view layouts
-    col1, col2 = st.columns(2)
-    with col1:
-        st.caption(f"Original Page {preview_page_num}")
-        st.image(orig_preview_img, use_container_width=True)
-    with col2:
-        st.caption(f"Enhanced Page {preview_page_num} (Live Preview)")
-        st.image(enhanced_preview_img, use_container_width=True)
-
-    st.markdown("---")
-
-    # --- FULL PRODUCTION BUNDLE AND CONVERT PACK RUN ---
-    st.subheader("🚀 Ready?")
-    if st.button("Enhance & Save All Pages as One PDF", type="primary", use_container_width=True):
-        with st.spinner(f"Compiling and enhancing all {total_pages} pages into a single print-ready PDF... please wait."):
-            try:
-                new_doc = fitz.open()
-
-                # Process every single file node sequentially
-                for idx, uploaded_file in enumerate(uploaded_files):
-                    file_bytes = uploaded_file.getvalue() if hasattr(uploaded_file, "getvalue") else uploaded_file.read()
-                    file_ext = os.path.splitext(uploaded_file.name)[1].lower()
-
-                    if file_ext == ".pdf":
-                        doc = fitz.open(stream=file_bytes, filetype="pdf")
-                        for page_index in range(len(doc)):
-                            img = render_pdf_page(doc, page_index, dpi=dpi_setting)  # high-def print scaling
-                            img = apply_enhancements(img, sharpness_val, brightness_val, contrast_val)
-
-                            img_bytes = io.BytesIO()
-                            img.save(img_bytes, format="JPEG", quality=95)
-                            img_bytes.seek(0)
-
-                            img_doc = fitz.open("pdf", fitz.open(stream=img_bytes.getvalue(), filetype="jpeg").convert_to_pdf())
-                            new_doc.insert_pdf(img_doc)
-                        doc.close()
-                    else:
-                        img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
-                        img = scale_image_for_print(img, dpi_setting)
-                        img = apply_enhancements(img, sharpness_val, brightness_val, contrast_val)
+                        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                        img = apply_commercial_grade_enhancements(img)
 
                         img_bytes = io.BytesIO()
-                        img.save(img_bytes, format="JPEG", quality=95, dpi=(dpi_setting, dpi_setting))
+                        img.save(img_bytes, format="PNG")
                         img_bytes.seek(0)
 
-                        img_doc = fitz.open("pdf", fitz.open(stream=img_bytes.getvalue(), filetype="jpeg").convert_to_pdf())
+                        img_doc = fitz.open("pdf", fitz.open(stream=img_bytes.getvalue(), filetype="png").convert_to_pdf())
                         new_doc.insert_pdf(img_doc)
+                        total_pages_processed += 1
+                    doc.close()
 
-                # Save the final consolidated multi-page bundle
+                # Scenario B: Process raw incoming image formats
+                elif file_ext in [".png", ".jpg", ".jpeg", ".jfif"]:
+                    img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+
+                    img = smart_upscale(img)
+                    img = apply_commercial_grade_enhancements(img)
+
+                    img_bytes = io.BytesIO()
+                    img.save(img_bytes, format="PNG")
+                    img_bytes.seek(0)
+
+                    img_doc = fitz.open("pdf", fitz.open(stream=img_bytes.getvalue(), filetype="png").convert_to_pdf())
+                    new_doc.insert_pdf(img_doc)
+                    total_pages_processed += 1
+
+            if total_pages_processed > 0:
+                # Save compiled lossless document to output byte buffers
                 output_stream = io.BytesIO()
                 new_doc.save(output_stream)
                 new_doc.close()
-
-                output_bytes = output_stream.getvalue()
-
-                st.balloons()
-                st.success("✨ Document package compilation and text optimization complete!")
-
-                st.download_button(
-                    label="💾 DOWNLOAD PDF FILE",
-                    data=output_bytes,
-                    file_name="enhanced_compiled_output.pdf",
-                    mime="application/pdf",
-                    use_container_width=True
-                )
-
-            except Exception as e:
-                st.error(f"An unexpected tracking error occurred during conversion: {e}")
+                
+                final_pdf_bytes = output_stream.getvalue()
+                final_filename = f"enhanced_{base_output_name}.pdf"
+                
+                # Fire the dynamic instant download trigger
+                trigger_instant_download(final_pdf_bytes, final_filename, "application/pdf")
+                st.success(f"✨ Success! '{final_filename}' generated and downloaded automatically.")
+            else:
+                st.error("❌ Error: No valid images or PDF pages could be processed.")
