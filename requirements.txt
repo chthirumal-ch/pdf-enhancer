@@ -1,2 +1,5 @@
+streamlit
 PyMuPDF
 pillow
+opencv-python-headless
+numpy
