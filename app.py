@@ -15,7 +15,7 @@ st.sidebar.header("🎛️ Fine-Tune Enhancements")
 dpi_setting = st.sidebar.slider("Resolution (DPI)", min_value=250, max_value=400, value=300, step=10)
 
 # Settings matching your core text enhancement adjustments
-sharpness_val = st.sidebar.slider("Sharpness", min_value=1.0, max_value=3.0, value=1.80, step=0.1)
+sharpness_val = st.sidebar.slider("Sharpness", min_value=1.0, max_value=5.0, value=1.80, step=0.1)
 brightness_val = st.sidebar.slider("Brightness", min_value=1.0, max_value=3.0, value=1.60, step=0.1)
 contrast_val = st.sidebar.slider("Contrast", min_value=1.0, max_value=3.0, value=1.40, step=0.1)
 
