@@ -4,7 +4,6 @@ import numpy as np
 import fitz  # PyMuPDF
 import io
 import os
-import base64
 from PIL import Image
 
 # ⚙️ Web Workspace Layout Initializer Configuration
@@ -74,7 +73,7 @@ def apply_commercial_grade_enhancements(pil_img, mode=OUTPUT_MODE):
         block = _odd(35 * scale_ref)
         binary = cv2.adaptiveThreshold(
             crisp, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY, block, 12
+            thresh_type=cv2.THRESH_BINARY, blockSize=block, C=12
         )
         final_gray = cv2.medianBlur(binary, 3)
     else:
@@ -98,21 +97,6 @@ def smart_upscale(img):
 
     return img.resize((int(w * scale_factor), int(h * scale_factor)), Image.Resampling.LANCZOS)
 
-def trigger_instant_download(data_bytes, filename, mime_type):
-    """Injects a frontend JS trigger to download files automatically without extra steps."""
-    b64_data = base64.b64encode(data_bytes).decode()
-    js_script = f"""
-        <script>
-            var link = document.createElement('a');
-            link.href = 'data:{mime_type};base64,{b64_data}';
-            link.download = '{filename}';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        </script>
-    """
-    # Exposing the dynamic frontend trigger execution layer quietly
-    st.components.v1.html(js_script, height=0, width=0)
 
 # ==============================================================================
 # STREAMLIT INTERFACE MANAGER
@@ -124,30 +108,51 @@ uploaded_files = st.file_uploader(
 )
 
 if uploaded_files:
-    # A single dynamic primary execution panel
-    if st.button("🚀 Enhance & Download", type="primary", use_container_width=True):
-        with st.spinner("Processing files... Please wait..."):
-            new_doc = fitz.open()
-            total_pages_processed = 0
-            base_output_name = "enhanced_document"
+    # Use Streamlit session state to cache data securely between button clicks
+    if 'processed_pdf_bytes' not in st.session_state:
+        st.session_state.processed_pdf_bytes = None
+        st.session_state.final_filename = ""
 
-            for idx, file in enumerate(uploaded_files):
-                file_bytes = file.read()
-                file_ext = os.path.splitext(file.name)[1].lower()
-                
-                # Grabbing the name of the first file for download tracking
-                if idx == 0:
-                    base_output_name = os.path.splitext(file.name)[0]
+    # STATE 1: If data hasn't been enhanced yet, show the main Action button
+    if st.session_state.processed_pdf_bytes is None:
+        if st.button("🚀 Run Enhancement", type="primary", use_container_width=True):
+            with st.spinner("Processing files... Please wait..."):
+                new_doc = fitz.open()
+                total_pages_processed = 0
+                base_output_name = "enhanced_document"
 
-                # Scenario A: Process PDF pack elements page by page
-                if file_ext == ".pdf":
-                    doc = fitz.open(stream=file_bytes, filetype="pdf")
-                    for page_index in range(len(doc)):
-                        page = doc[page_index]
-                        zoom_matrix = fitz.Matrix(PDF_ZOOM_FACTOR, PDF_ZOOM_FACTOR)
-                        pix = page.get_pixmap(matrix=zoom_matrix, colorspace=fitz.csRGB, alpha=False)
+                for idx, file in enumerate(uploaded_files):
+                    file_bytes = file.read()
+                    file_ext = os.path.splitext(file.name)[1].lower()
+                    
+                    if idx == 0:
+                        base_output_name = os.path.splitext(file.name)[0]
 
-                        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    # Scenario A: Process PDF pages
+                    if file_ext == ".pdf":
+                        doc = fitz.open(stream=file_bytes, filetype="pdf")
+                        for page_index in range(len(doc)):
+                            page = doc[page_index]
+                            zoom_matrix = fitz.Matrix(PDF_ZOOM_FACTOR, PDF_ZOOM_FACTOR)
+                            pix = page.get_pixmap(matrix=zoom_matrix, colorspace=fitz.csRGB, alpha=False)
+
+                            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                            img = apply_commercial_grade_enhancements(img)
+
+                            img_bytes = io.BytesIO()
+                            img.save(img_bytes, format="PNG")
+                            img_bytes.seek(0)
+
+                            img_doc = fitz.open("pdf", fitz.open(stream=img_bytes.getvalue(), filetype="png").convert_to_pdf())
+                            new_doc.insert_pdf(img_doc)
+                            total_pages_processed += 1
+                        doc.close()
+
+                    # Scenario B: Process images (PNG, JPG, JPEG, JFIF)
+                    elif file_ext in [".png", ".jpg", ".jpeg", ".jfif"]:
+                        img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+
+                        img = smart_upscale(img)
                         img = apply_commercial_grade_enhancements(img)
 
                         img_bytes = io.BytesIO()
@@ -157,34 +162,36 @@ if uploaded_files:
                         img_doc = fitz.open("pdf", fitz.open(stream=img_bytes.getvalue(), filetype="png").convert_to_pdf())
                         new_doc.insert_pdf(img_doc)
                         total_pages_processed += 1
-                    doc.close()
 
-                # Scenario B: Process raw incoming image formats
-                elif file_ext in [".png", ".jpg", ".jpeg", ".jfif"]:
-                    img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+                if total_pages_processed > 0:
+                    output_stream = io.BytesIO()
+                    new_doc.save(output_stream)
+                    new_doc.close()
+                    
+                    # Store final output variables inside session memory
+                    st.session_state.processed_pdf_bytes = output_stream.getvalue()
+                    st.session_state.final_filename = f"enhanced_{base_output_name}.pdf"
+                    st.rerun()
+                else:
+                    st.error("❌ Error: No valid images or PDF pages could be processed.")
 
-                    img = smart_upscale(img)
-                    img = apply_commercial_grade_enhancements(img)
-
-                    img_bytes = io.BytesIO()
-                    img.save(img_bytes, format="PNG")
-                    img_bytes.seek(0)
-
-                    img_doc = fitz.open("pdf", fitz.open(stream=img_bytes.getvalue(), filetype="png").convert_to_pdf())
-                    new_doc.insert_pdf(img_doc)
-                    total_pages_processed += 1
-
-            if total_pages_processed > 0:
-                # Save compiled lossless document to output byte buffers
-                output_stream = io.BytesIO()
-                new_doc.save(output_stream)
-                new_doc.close()
-                
-                final_pdf_bytes = output_stream.getvalue()
-                final_filename = f"enhanced_{base_output_name}.pdf"
-                
-                # Fire the dynamic instant download trigger
-                trigger_instant_download(final_pdf_bytes, final_filename, "application/pdf")
-                st.success(f"✨ Success! '{final_filename}' generated and downloaded automatically.")
-            else:
-                st.error("❌ Error: No valid images or PDF pages could be processed.")
+    # STATE 2: Processing complete! Instantly show the native secure download layout
+    else:
+        st.balloons()
+        st.success("🎉 Enhancement processing complete!")
+        
+        # This official native button instantly pops open the browser file save path window 
+        st.download_button(
+            label=f"📥 DOWNLOAD YOUR ENHANCED PDF ({st.session_state.final_filename})",
+            data=st.session_state.processed_pdf_bytes,
+            file_name=st.session_state.final_filename,
+            mime="application/pdf",
+            type="primary",
+            use_container_width=True
+        )
+        
+        # Clean session reset layout button to process a fresh batch of documents
+        if st.button("🔄 Enhance Another Document Pack", use_container_width=True):
+            st.session_state.processed_pdf_bytes = None
+            st.session_state.final_filename = ""
+            st.rerun()
