@@ -7,9 +7,9 @@ import os
 from PIL import Image
 
 # ⚙️ Web Workspace Layout Initializer Configuration
-st.set_page_config(page_title="AI Document Enhancer Pro", page_icon="📄", layout="centered")
+st.set_page_config(page_title="AI Document Enhancer Pro", page_icon="💎", layout="centered")
 
-st.title("📄 COMMERCIAL-GRADE AUTOMATED DOCUMENT ENHANCER")
+st.title("💎DOCUMENT ENHANCER")
 st.write("Upload raw smartphone images or PDF packets. The app will automatically optimize text clarity and wipe background stains.")
 
 # ==============================================================================
@@ -177,12 +177,11 @@ if uploaded_files:
 
     # STATE 2: Processing complete! Instantly show the native secure download layout
     else:
-        st.balloons()
         st.success("🎉 Enhancement processing complete!")
         
         # This official native button instantly pops open the browser file save path window 
         st.download_button(
-            label=f"📥 DOWNLOAD YOUR ENHANCED PDF ({st.session_state.final_filename})",
+            label=f"⬇️ DOWNLOAD PDF ({st.session_state.final_filename})",
             data=st.session_state.processed_pdf_bytes,
             file_name=st.session_state.final_filename,
             mime="application/pdf",
@@ -191,7 +190,7 @@ if uploaded_files:
         )
         
         # Clean session reset layout button to process a fresh batch of documents
-        if st.button("🔄 Enhance Another Document Pack", use_container_width=True):
+        if st.button("🔄 Another Document ", use_container_width=True):
             st.session_state.processed_pdf_bytes = None
             st.session_state.final_filename = ""
             st.rerun()
