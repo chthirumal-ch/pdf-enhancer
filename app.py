@@ -23,7 +23,7 @@ OUTPUT_MODE = "grayscale"   # "grayscale" or "binary"
 DENOISE_STRENGTH = 15       # Less smoothing of photos / thin strokes
 LIGHT_MAP_SIZE = 110        # Larger = keeps more photo tone (shadows still removed)
 SHARPEN_AMOUNT = 2.0        # High sharpness multiplier
-SHARPEN_SIGMA = 0.9         # Tighter radius = crisper edges, fewer halos
+SHARPEN_SIGMA = 0.8         # Tighter radius = crisper edges, fewer halos
 CONTRAST_BOOST = 1.0        # Smoothstep S-curve contrast boost
 
 def _odd(n):
